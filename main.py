@@ -6,6 +6,11 @@ import numpy as np
 import pandas as pd
 from skimage import io 
 from pathlib import Path
+from skimage.draw import disk
+import matplotlib.pyplot as plt
+from skimage.measure import regionprops
+from skimage.feature import peak_local_max
+from skimage.morphology import binary_dilation, label
 
 #%% Initialize ----------------------------------------------------------------
 
@@ -60,10 +65,7 @@ for img_path in sorted(Path('data').iterdir()):
 
 #%% 
 
-from skimage.draw import disk
-from skimage.feature import peak_local_max
-from skimage.morphology import binary_dilation, label
-from skimage.measure import regionprops
+
 
 mDist = 25
 thresh = 7500
@@ -77,7 +79,6 @@ iData['nLabels'] = []
 iData['nAreas'] = []
 iData['nIntRFP'] = []
 iData['nIntGFP'] = []
-iData['nDisplay'] = []
 
 # Segment nuclei and extract info
 for i, RFP_img in enumerate(np.stack(iData['RFP_img'])):
@@ -106,9 +107,6 @@ for i, RFP_img in enumerate(np.stack(iData['RFP_img'])):
     nLabels = np.stack([prop['label'] for prop in props])
     nAreas = np.stack([prop['area'] for prop in props])
 
-    # Make displays
-    nDisplay = binary_dilation(nMask) ^ nMask
-    
     # Append iData
     iData['nCoords'].append(nCoords)
     iData['cMask'].append(cMask)
@@ -118,7 +116,6 @@ for i, RFP_img in enumerate(np.stack(iData['RFP_img'])):
     iData['nAreas'].append(nAreas)
     iData['nIntRFP'].append(nIntRFP)
     iData['nIntGFP'].append(nIntGFP)
-    iData['nDisplay'].append(nDisplay)
     
 #%%
 
@@ -154,11 +151,13 @@ for i in range(len(iData['name'])):
         
 #%%
 
-import matplotlib.pyplot as plt
+from scipy.stats import ttest_ind, mannwhitneyu
 
-# Create empty dict (tag data = tData)
-tData = {
-    'tag': [],
+# Create empty dict (plot data = pData)
+pData = {
+    'strain': [],
+    'cond': [],
+    'tp': [],
     'data': [],
     }
 
@@ -166,6 +165,7 @@ for strain in np.unique(nData['strain']):
     for cond in np.unique(nData['cond']):
         for tp in np.unique(nData['tp']):
             
+            # Extract nIntRFP and nIntGFP data
             data = nData.loc[
                 (nData['strain'] == strain) &
                 (nData['cond'] == cond) &
@@ -175,95 +175,127 @@ for strain in np.unique(nData['strain']):
             
             if not data.empty:
                 
-                tData['tag'].append(f'{strain}_{cond}_{tp}')
-                tData['data'].append(data)
+                pData['strain'].append(strain)
+                pData['cond'].append(cond)
+                pData['tp'].append(str(tp))
+                pData['data'].append(data)
                 
-# -----------------------------------------------------------------------------
-
-import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib.ticker as ticker
-from mpl_toolkits.axisartist.parasite_axes import SubplotHost
-
-tags = [tag for tag in tData['tag']]
-nIntRFP = [data.to_numpy()[:,0] for data in tData['data']]
-nIntGFP = [data.to_numpy()[:,1] for data in tData['data']]
-
-fig = plt.figure()
-ax1 = SubplotHost(fig, 111)
-fig.add_subplot(ax1)
-
-ax1.boxplot(nIntRFP, labels=['0', '30', '60', '120', '0', '30', '60', '120'])
-
-ax2 = ax1.twiny()
-offset = 0, -25 # Position of the second axis
-new_axisline = ax2.get_grid_helper().new_fixed_axis
-ax2.axis["bottom"] = new_axisline(loc="bottom", axes=ax2, offset=offset)
-# ax2.axis["top"].set_visible(False)
-            
-# tags = [tag for tag in tData['tag']]
-# nIntRFP = [data.to_numpy()[:,0] for data in tData['data']]
-# nIntGFP = [data.to_numpy()[:,1] for data in tData['data']]
-
-# fig, ax = plt.subplots(nrows=2, ncols=1)
-# ax[0].boxplot(nIntRFP, labels=tags)
-# ax[1].boxplot(nIntGFP, labels=tags)
-
-# for ax in fig.get_axes():
-#     ax.label_outer()
+# Statistics (ttest & mwtest)
+tTest_nIntRFP = []; mwTest_nIntRFP = []
+tTest_nIntGFP = []; mwTest_nIntGFP = []
+for strain in np.unique(nData['strain']):
     
-# ax.set_xticklabels([])
-
+    # Extract strain data dict (sData)
+    idx = [i for i, val in enumerate(pData['strain']) if val == strain]    
+    sData = {
+        key: value[idx[0]:idx[-1]+1] 
+        for key, value 
+        in pData.items()
+        }
+    
+    # Perform statistical tests (against ctrl 0 min)
+    crtl_nIntRFP = sData['data'][0].to_numpy()[:,0]
+    crtl_nIntGFP = sData['data'][0].to_numpy()[:,1]
+    
+    for data in sData['data']:      
+        
+        test_nIntRFP = data.to_numpy()[:,0]  
+        _, p = ttest_ind(crtl_nIntRFP, test_nIntRFP, equal_var=True)
+        tTest_nIntRFP.append(p)
+        _, p = mannwhitneyu(crtl_nIntRFP, test_nIntRFP)
+        mwTest_nIntRFP.append(p)
+        test_nIntGFP = data.to_numpy()[:,1]
+        _, p = ttest_ind(crtl_nIntGFP, test_nIntGFP, equal_var=True)
+        tTest_nIntGFP.append(p)
+        _, p = mannwhitneyu(crtl_nIntGFP, test_nIntGFP)
+        mwTest_nIntGFP.append(p)
+        
 #%%
+        
+# Format data and labels for plotting
+nIntRFP = [data.to_numpy()[:,0] for data in pData['data']]
+nIntGFP = [data.to_numpy()[:,1] for data in pData['data']]
 
-# import numpy as np
+xLabels = [
+    f'{tp}\n{cond}\n{strain}' 
+    for (tp, cond, strain) 
+    in zip(pData['tp'], pData['cond'], pData['strain'])
+    ]
+
+tLabels_nIntRFP = [
+    f'p = \n{tP:.2e}' 
+    for (tP, mwP) 
+    in zip(tTest_nIntRFP, mwTest_nIntRFP)
+    ]
+tLabels_nIntRFP = [
+    '' if val == 'p = \n1.00e+00' else val 
+    for val in tLabels_nIntRFP 
+    ]
+
+tLabels_nIntGFP = [
+    f'p = \n{tP:.2e}' 
+    for (tP, mwP) 
+    in zip(tTest_nIntGFP, mwTest_nIntGFP)
+    ]
+tLabels_nIntGFP = [
+    '' if val == 'p = \n1.00e+00' else val 
+    for val in tLabels_nIntGFP 
+    ]
+        
+# Boxplot
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(6, 8))
+box1 = ax1.boxplot(nIntRFP, labels=xLabels)
+box2 = ax2.boxplot(nIntGFP, labels=xLabels)
+plt.subplots_adjust(hspace=0.75)
+ax1.set_title('Nuclear RFP fluo. int. (A.U.)', y=1.25)
+ax2.set_title('Nuclear GFP fluo. int. (A.U.)', y=1.25)
+ax2.tick_params(axis='x', labelsize=8)
+
+# Add custom labels on top of each box
+for i, (box_obj, tLabel) in enumerate(zip(box1['boxes'], tLabels_nIntRFP)):
+    box_coords = box_obj.get_path().vertices
+    box_x = np.mean(box_coords[:, 0])
+    box_y = np.max(box_coords[:, 1])
+    ax1.text(box_x, ax1.get_ylim()[1]*1.05, tLabel, ha='center', va='bottom', fontsize=8)
+    
+for i, (box_obj, tLabel) in enumerate(zip(box2['boxes'], tLabels_nIntGFP)):
+    box_coords = box_obj.get_path().vertices
+    box_x = np.mean(box_coords[:, 0])
+    box_y = np.max(box_coords[:, 1])
+    ax2.text(box_x, ax2.get_ylim()[1]*1.05, tLabel, ha='center', va='bottom', fontsize=8)
+
+#%% 
+
 # import matplotlib.pyplot as plt
-# import matplotlib.ticker as ticker
-# from mpl_toolkits.axisartist.parasite_axes import SubplotHost
+# import numpy as np
 
-# fig1 = plt.figure()
-# ax1 = SubplotHost(fig1, 111)
-# fig1.add_subplot(ax1)
+# # Create some random data for the boxplot
+# np.random.seed(42)
+# data1 = np.random.normal(100, 10, 200)
+# data2 = np.random.normal(80, 30, 200)
+# data3 = np.random.normal(90, 20, 200)
+# data = [data1, data2, data3]
 
-# # Some data
-# x = np.arange(1,6)
-# y = np.random.random(len(x))
+# # Create boxplot
+# fig, ax = plt.subplots()
+# box = ax.boxplot(data, patch_artist=True)
 
-# # First X-axis
-# ax1.plot(x, y)
-# ax1.set_xticks(x)
-# ax1.set_xticklabels(['dog', 'cat', 'horse', 'lizard', 'crocodile'])
-# #ax1.xaxis.set_label_text('First X-axis') # Uncomment to label axis
-# ax1.yaxis.set_label_text("Sample data")
+# # Define custom labels
+# custom_labels = ['Label 1', 'Label 2', 'Label 3']
 
-# # Second X-axis
-# ax2 = ax1.twiny()
-# offset = 0, -25 # Position of the second axis
-# new_axisline = ax2.get_grid_helper().new_fixed_axis
-# ax2.axis["bottom"] = new_axisline(loc="bottom", axes=ax2, offset=offset)
-# ax2.axis["top"].set_visible(False)
+# # Add custom labels on top of each box
+# for i, (box_obj, label) in enumerate(zip(box['boxes'], custom_labels)):
+#     box_coords = box_obj.get_path().vertices
+#     box_x = np.mean(box_coords[:, 0])
+#     box_y = np.max(box_coords[:, 1])
+#     ax.text(box_x, box_y + 2, label, ha='center', va='bottom', fontsize=10)
 
-# ax2.set_xticks([0.0, 0.6, 1.0])
-# ax2.xaxis.set_major_formatter(ticker.NullFormatter())
-# ax2.xaxis.set_minor_locator(ticker.FixedLocator([0.3, 0.8]))
-# ax2.xaxis.set_minor_formatter(ticker.FixedFormatter(['mammal', 'reptiles']))
+# # Customize the plot appearance
+# ax.set_xticklabels(['Data 1', 'Data 2', 'Data 3'])
+# ax.set_ylabel('Values')
+# ax.set_title('Boxplot with Custom Labels')
 
-# # Third X-axis
-# ax3 = ax1.twiny()
-# offset = 0, -50
-# new_axisline = ax3.get_grid_helper().new_fixed_axis
-# ax3.axis["bottom"] = new_axisline(loc="bottom", axes=ax3, offset=offset)
-# ax3.axis["top"].set_visible(False)
-
-# ax3.set_xticks([0.0, 1.0])
-# ax3.xaxis.set_major_formatter(ticker.NullFormatter())
-# ax3.xaxis.set_minor_locator(ticker.FixedLocator([0.5]))
-# ax3.xaxis.set_minor_formatter(ticker.FixedFormatter(['vertebrates']))
-
-# ax1.grid(1)
 # plt.show()
-
-
 
 #%%
 
