@@ -1,6 +1,7 @@
 #%% Imports -------------------------------------------------------------------
 
 import re
+import cv2
 import time
 import numpy as np
 import pandas as pd
@@ -56,16 +57,14 @@ for img_path in sorted(Path('data').iterdir()):
         iData['name'].append(GFP_name.replace('_GFPdual', ''))
         iData['GFP_name'].append(GFP_name)
         iData['RFP_name'].append(RFP_name)
+        iData['GFP_img'].append(GFP_img)
+        iData['RFP_img'].append(RFP_img)
         iData['strain'].append(strain)
         iData['cond'].append(cond)
         iData['tp'].append(tp)
         iData['exp'].append(exp)
-        iData['GFP_img'].append(GFP_img)
-        iData['RFP_img'].append(RFP_img)
 
 #%% 
-
-
 
 mDist = 25
 thresh = 7500
@@ -99,10 +98,10 @@ for i, RFP_img in enumerate(np.stack(iData['RFP_img'])):
     nMask[cMask==False] = False
     
     # Get nuclei info
-    nLabels = label(nMask)
-    props = regionprops(nLabels, iData['RFP_img'][i])
+    nLabels2D = label(nMask)
+    props = regionprops(nLabels2D, iData['RFP_img'][i])
     nIntRFP = np.stack([prop['intensity_mean'] for prop in props])
-    props = regionprops(nLabels, iData['GFP_img'][i])
+    props = regionprops(nLabels2D, iData['GFP_img'][i])
     nIntGFP = np.stack([prop['intensity_mean'] for prop in props])
     nLabels = np.stack([prop['label'] for prop in props])
     nAreas = np.stack([prop['area'] for prop in props])
@@ -111,7 +110,7 @@ for i, RFP_img in enumerate(np.stack(iData['RFP_img'])):
     iData['nCoords'].append(nCoords)
     iData['cMask'].append(cMask)
     iData['nMask'].append(nMask)
-    iData['nLabels2D'].append(nLabels)
+    iData['nLabels2D'].append(nLabels2D)
     iData['nLabels'].append(nLabels)
     iData['nAreas'].append(nAreas)
     iData['nIntRFP'].append(nIntRFP)
@@ -121,7 +120,7 @@ for i, RFP_img in enumerate(np.stack(iData['RFP_img'])):
 
 # Create empty DataFrame (nuclei data = nData)
 headers = [
-    'strain', 'cond', 'tp', 'exp',
+    'name', 'strain', 'cond', 'tp', 'exp',
     'xCoord', 'yCoord', 'nLabel', 'nArea', 'nIntRFP', 'nIntGFP',
     ]
 
@@ -130,6 +129,7 @@ nData = pd.DataFrame(columns=headers)
 # Append nData
 for i in range(len(iData['name'])):
     
+    name = iData['name'][i]
     strain = iData['strain'][i]
     cond = iData['cond'][i]
     tp = iData['tp'][i]
@@ -137,165 +137,203 @@ for i in range(len(iData['name'])):
     
     for n in range(iData['nCoords'][i].shape[0]):
         
-        xCoord = iData['nCoords'][i][n][0]
-        yCoord = iData['nCoords'][i][n][1]
+        yCoord = iData['nCoords'][i][n][0]
+        xCoord = iData['nCoords'][i][n][1]
         nLabel = iData['nLabels'][i][n]
         nArea = iData['nAreas'][i][n]
         nIntRFP = iData['nIntRFP'][i][n]
         nIntGFP = iData['nIntGFP'][i][n]
         
         nData.loc[len(nData)] = [
-            strain, cond, tp, exp,
-            xCoord, yCoord, nLabel, nArea, nIntRFP, nIntGFP,
+            name, strain, cond, tp, exp,
+            yCoord, xCoord, nLabel, nArea, nIntRFP, nIntGFP,
             ]
         
 #%%
 
-from scipy.stats import ttest_ind, mannwhitneyu
+from datetime import datetime
+date = datetime.now().strftime("%y%m%d-%H%M%S")
 
-# Create empty dict (plot data = pData)
-pData = {
-    'strain': [],
-    'cond': [],
-    'tp': [],
-    'data': [],
-    }
+# -----------------------------------------------------------------------------
 
-for strain in np.unique(nData['strain']):
-    for cond in np.unique(nData['cond']):
-        for tp in np.unique(nData['tp']):
-            
-            # Extract nIntRFP and nIntGFP data
-            data = nData.loc[
-                (nData['strain'] == strain) &
-                (nData['cond'] == cond) &
-                (nData['tp'] == tp),
-                ['nIntRFP', 'nIntGFP']
-                ]
-            
-            if not data.empty:
-                
-                pData['strain'].append(strain)
-                pData['cond'].append(cond)
-                pData['tp'].append(str(tp))
-                pData['data'].append(data)
-                
-# Statistics (ttest & mwtest)
-tTest_nIntRFP = []; mwTest_nIntRFP = []
-tTest_nIntGFP = []; mwTest_nIntGFP = []
-for strain in np.unique(nData['strain']):
+folder_name = f'{date}_analysis'
+folder_path = Path('data') / folder_name
+folder_path.mkdir(parents=True, exist_ok=False)
+
+# -----------------------------------------------------------------------------
+
+nData.to_csv(Path(folder_path) / 'nData.csv', index=False, float_format='%.3f')
+
+# -----------------------------------------------------------------------------
+
+#%%
+
+from skimage.morphology import disk
+
+nDisplay = []
+for i in range(len(iData['name'])):
     
-    # Extract strain data dict (sData)
-    idx = [i for i, val in enumerate(pData['strain']) if val == strain]    
-    sData = {
-        key: value[idx[0]:idx[-1]+1] 
-        for key, value 
-        in pData.items()
-        }
+    name = iData['name'][i]
+    nMask = iData['nMask'][i]
+    RFP_img = iData['RFP_img'][i]
+    GFP_img = iData['GFP_img'][i]
     
-    # Perform statistical tests (against ctrl 0 min)
-    crtl_nIntRFP = sData['data'][0].to_numpy()[:,0]
-    crtl_nIntGFP = sData['data'][0].to_numpy()[:,1]
+    tmpDisplay = (binary_dilation(nMask, footprint=disk(2)) ^ nMask)
     
-    for data in sData['data']:      
+    for n in range(iData['nCoords'][i].shape[0]):
         
-        test_nIntRFP = data.to_numpy()[:,0]  
-        _, p = ttest_ind(crtl_nIntRFP, test_nIntRFP, equal_var=True)
-        tTest_nIntRFP.append(p)
-        _, p = mannwhitneyu(crtl_nIntRFP, test_nIntRFP)
-        mwTest_nIntRFP.append(p)
-        test_nIntGFP = data.to_numpy()[:,1]
-        _, p = ttest_ind(crtl_nIntGFP, test_nIntGFP, equal_var=True)
-        tTest_nIntGFP.append(p)
-        _, p = mannwhitneyu(crtl_nIntGFP, test_nIntGFP)
-        mwTest_nIntGFP.append(p)
+        yCoord = iData['nCoords'][i][n][0]
+        xCoord = iData['nCoords'][i][n][1]
+        nLabel = iData['nLabels'][i][n]
+        
+        tmpDisplay = cv2.putText(
+            tmpDisplay.astype('uint16'), str(nLabel), (xCoord + 12, yCoord - 6),
+            cv2.FONT_HERSHEY_DUPLEX, 1, (1,1,1), 1, cv2.LINE_AA
+            )  
+        
+    nDisplay.append(np.stack((RFP_img, GFP_img, tmpDisplay * 65535), axis=0))
+    
+# -----------------------------------------------------------------------------
+
+nDisplay = np.stack(nDisplay)
+display_name = name + '_display.tif'
+
+val_range = np.arange(65535, dtype=np.uint8)
+
+lut_magenta= np.zeros((3, 65535), dtype='uint16')
+lut_magenta[[0,2],:] = np.arange(65535, dtype='uint16')
+
+lut_green = np.zeros((3, 65535), dtype='uint16')
+lut_green[1, :] = val_range
+
+lut_gray = np.stack([val_range, val_range, val_range])
+
+io.imsave(
+    Path(folder_path, display_name),
+    nDisplay,
+    check_contrast=False,
+    imagej=True,
+    metadata={
+        'axes': 'ZCYX', 
+        'mode': 'composite',
+        'LUTs': [lut_magenta, lut_green, lut_gray]
+        }
+    )
+    
+#%%
+
+# from scipy.stats import ttest_ind, mannwhitneyu
+
+# # Create empty dict (plot data = pData)
+# pData = {
+#     'strain': [],
+#     'cond': [],
+#     'tp': [],
+#     'data': [],
+#     }
+
+# for strain in np.unique(nData['strain']):
+#     for cond in np.unique(nData['cond']):
+#         for tp in np.unique(nData['tp']):
+            
+#             # Extract nIntRFP and nIntGFP data
+#             data = nData.loc[
+#                 (nData['strain'] == strain) &
+#                 (nData['cond'] == cond) &
+#                 (nData['tp'] == tp),
+#                 ['nIntRFP', 'nIntGFP']
+#                 ]
+            
+#             if not data.empty:
+                
+#                 pData['strain'].append(strain)
+#                 pData['cond'].append(cond)
+#                 pData['tp'].append(str(tp))
+#                 pData['data'].append(data)
+                
+# # Statistics (ttest & mwtest)
+# tTest_nIntRFP = []; mwTest_nIntRFP = []
+# tTest_nIntGFP = []; mwTest_nIntGFP = []
+# for strain in np.unique(nData['strain']):
+    
+#     # Extract strain data dict (sData)
+#     idx = [i for i, val in enumerate(pData['strain']) if val == strain]    
+#     sData = {
+#         key: value[idx[0]:idx[-1]+1] 
+#         for key, value 
+#         in pData.items()
+#         }
+    
+#     # Perform statistical tests (against ctrl 0 min)
+#     crtl_nIntRFP = sData['data'][0].to_numpy()[:,0]
+#     crtl_nIntGFP = sData['data'][0].to_numpy()[:,1]
+    
+#     for data in sData['data']:      
+        
+#         test_nIntRFP = data.to_numpy()[:,0]  
+#         _, p = ttest_ind(crtl_nIntRFP, test_nIntRFP, equal_var=True)
+#         tTest_nIntRFP.append(p)
+#         _, p = mannwhitneyu(crtl_nIntRFP, test_nIntRFP)
+#         mwTest_nIntRFP.append(p)
+#         test_nIntGFP = data.to_numpy()[:,1]
+#         _, p = ttest_ind(crtl_nIntGFP, test_nIntGFP, equal_var=True)
+#         tTest_nIntGFP.append(p)
+#         _, p = mannwhitneyu(crtl_nIntGFP, test_nIntGFP)
+#         mwTest_nIntGFP.append(p)
         
 #%%
         
-# Format data and labels for plotting
-nIntRFP = [data.to_numpy()[:,0] for data in pData['data']]
-nIntGFP = [data.to_numpy()[:,1] for data in pData['data']]
+# # Format data and labels for plotting
+# nIntRFP = [data.to_numpy()[:,0] for data in pData['data']]
+# nIntGFP = [data.to_numpy()[:,1] for data in pData['data']]
 
-xLabels = [
-    f'{tp}\n{cond}\n{strain}' 
-    for (tp, cond, strain) 
-    in zip(pData['tp'], pData['cond'], pData['strain'])
-    ]
+# xLabels = [
+#     f'{tp}\n{cond}\n{strain}' 
+#     for (tp, cond, strain) 
+#     in zip(pData['tp'], pData['cond'], pData['strain'])
+#     ]
 
-tLabels_nIntRFP = [
-    f'p = \n{tP:.2e}' 
-    for (tP, mwP) 
-    in zip(tTest_nIntRFP, mwTest_nIntRFP)
-    ]
-tLabels_nIntRFP = [
-    '' if val == 'p = \n1.00e+00' else val 
-    for val in tLabels_nIntRFP 
-    ]
+# tLabels_nIntRFP = [
+#     f'p = \n{tP:.2e}' 
+#     for (tP, mwP) 
+#     in zip(tTest_nIntRFP, mwTest_nIntRFP)
+#     ]
+# tLabels_nIntRFP = [
+#     '' if val == 'p = \n1.00e+00' else val 
+#     for val in tLabels_nIntRFP 
+#     ]
 
-tLabels_nIntGFP = [
-    f'p = \n{tP:.2e}' 
-    for (tP, mwP) 
-    in zip(tTest_nIntGFP, mwTest_nIntGFP)
-    ]
-tLabels_nIntGFP = [
-    '' if val == 'p = \n1.00e+00' else val 
-    for val in tLabels_nIntGFP 
-    ]
+# tLabels_nIntGFP = [
+#     f'p = \n{tP:.2e}' 
+#     for (tP, mwP) 
+#     in zip(tTest_nIntGFP, mwTest_nIntGFP)
+#     ]
+# tLabels_nIntGFP = [
+#     '' if val == 'p = \n1.00e+00' else val 
+#     for val in tLabels_nIntGFP 
+#     ]
         
-# Boxplot
-fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(6, 8))
-box1 = ax1.boxplot(nIntRFP, labels=xLabels)
-box2 = ax2.boxplot(nIntGFP, labels=xLabels)
-plt.subplots_adjust(hspace=0.75)
-ax1.set_title('Nuclear RFP fluo. int. (A.U.)', y=1.25)
-ax2.set_title('Nuclear GFP fluo. int. (A.U.)', y=1.25)
-ax2.tick_params(axis='x', labelsize=8)
-
-# Add custom labels on top of each box
-for i, (box_obj, tLabel) in enumerate(zip(box1['boxes'], tLabels_nIntRFP)):
-    box_coords = box_obj.get_path().vertices
-    box_x = np.mean(box_coords[:, 0])
-    box_y = np.max(box_coords[:, 1])
-    ax1.text(box_x, ax1.get_ylim()[1]*1.05, tLabel, ha='center', va='bottom', fontsize=8)
-    
-for i, (box_obj, tLabel) in enumerate(zip(box2['boxes'], tLabels_nIntGFP)):
-    box_coords = box_obj.get_path().vertices
-    box_x = np.mean(box_coords[:, 0])
-    box_y = np.max(box_coords[:, 1])
-    ax2.text(box_x, ax2.get_ylim()[1]*1.05, tLabel, ha='center', va='bottom', fontsize=8)
-
-#%% 
-
-# import matplotlib.pyplot as plt
-# import numpy as np
-
-# # Create some random data for the boxplot
-# np.random.seed(42)
-# data1 = np.random.normal(100, 10, 200)
-# data2 = np.random.normal(80, 30, 200)
-# data3 = np.random.normal(90, 20, 200)
-# data = [data1, data2, data3]
-
-# # Create boxplot
-# fig, ax = plt.subplots()
-# box = ax.boxplot(data, patch_artist=True)
-
-# # Define custom labels
-# custom_labels = ['Label 1', 'Label 2', 'Label 3']
+# # Boxplot
+# fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(6, 8))
+# box1 = ax1.boxplot(nIntRFP, labels=xLabels)
+# box2 = ax2.boxplot(nIntGFP, labels=xLabels)
+# plt.subplots_adjust(hspace=0.75)
+# ax1.set_title('Nuclear RFP fluo. int. (A.U.)', y=1.25)
+# ax2.set_title('Nuclear GFP fluo. int. (A.U.)', y=1.25)
+# ax2.tick_params(axis='x', labelsize=8)
 
 # # Add custom labels on top of each box
-# for i, (box_obj, label) in enumerate(zip(box['boxes'], custom_labels)):
+# for i, (box_obj, tLabel) in enumerate(zip(box1['boxes'], tLabels_nIntRFP)):
 #     box_coords = box_obj.get_path().vertices
 #     box_x = np.mean(box_coords[:, 0])
 #     box_y = np.max(box_coords[:, 1])
-#     ax.text(box_x, box_y + 2, label, ha='center', va='bottom', fontsize=10)
-
-# # Customize the plot appearance
-# ax.set_xticklabels(['Data 1', 'Data 2', 'Data 3'])
-# ax.set_ylabel('Values')
-# ax.set_title('Boxplot with Custom Labels')
-
-# plt.show()
+#     ax1.text(box_x, ax1.get_ylim()[1]*1.05, tLabel, ha='center', va='bottom', fontsize=8)
+    
+# for i, (box_obj, tLabel) in enumerate(zip(box2['boxes'], tLabels_nIntGFP)):
+#     box_coords = box_obj.get_path().vertices
+#     box_x = np.mean(box_coords[:, 0])
+#     box_y = np.max(box_coords[:, 1])
+#     ax2.text(box_x, ax2.get_ylim()[1]*1.05, tLabel, ha='center', va='bottom', fontsize=8)
 
 #%%
 
