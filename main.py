@@ -13,6 +13,8 @@ from skimage.measure import regionprops
 from skimage.feature import peak_local_max
 from skimage.morphology import binary_dilation, label
 
+''' There is something wrong with measured nIntRFP, not the good value '''
+
 #%% Initialize ----------------------------------------------------------------
 
 # Create empty dict (imgage data = iData)
@@ -83,13 +85,13 @@ iData['nIntGFP'] = []
 for i, RFP_img in enumerate(np.stack(iData['RFP_img'])):
     
     # Find nuclei positions (local maxima)
-    nCoords = peak_local_max(
+    lmCoords = peak_local_max(
         RFP_img, min_distance=mDist, threshold_abs=thresh
         )
     
     # Get circle mask (centered on nuclei positions)
     cMask = np.zeros_like(RFP_img, dtype=bool)
-    for coord in nCoords:
+    for coord in lmCoords:
         rr, cc = disk(coord, mDist//2.5, shape=RFP_img.shape)
         cMask[rr, cc] = True
         
@@ -103,6 +105,7 @@ for i, RFP_img in enumerate(np.stack(iData['RFP_img'])):
     nIntRFP = np.stack([prop['intensity_mean'] for prop in props])
     props = regionprops(nLabels2D, iData['GFP_img'][i])
     nIntGFP = np.stack([prop['intensity_mean'] for prop in props])
+    nCoords = np.stack([prop['centroid'] for prop in props]) # update nCoords (acc. to regionprops)
     nLabels = np.stack([prop['label'] for prop in props])
     nAreas = np.stack([prop['area'] for prop in props])
 
@@ -168,7 +171,9 @@ nData.to_csv(Path(folder_path) / 'nData.csv', index=False, float_format='%.3f')
 
 #%%
 
+from dtype import ranged_conversion
 from skimage.morphology import disk
+from skimage.exposure import rescale_intensity
 
 nDisplay = []
 for i in range(len(iData['name'])):
@@ -177,36 +182,54 @@ for i in range(len(iData['name'])):
     nMask = iData['nMask'][i]
     RFP_img = iData['RFP_img'][i]
     GFP_img = iData['GFP_img'][i]
+    # RFP_img = rescale_intensity(iData['RFP_img'][i], in_range=(0, 10000), out_range='uint16')
+    # GFP_img = rescale_intensity(iData['GFP_img'][i], in_range=(0, 2500), out_range='uint16')
+    # RFP_img = ranged_conversion(
+    #     iData['RFP_img'][i], 
+    #     intensity_range=(1,99), 
+    #     spread=10, 
+    #     dtype='uint16'
+    #     )
+    # GFP_img = ranged_conversion(
+    #     iData['GFP_img'][i], 
+    #     intensity_range=(1,99), 
+    #     spread=10, 
+    #     dtype='uint16'
+    #     )
     
     tmpDisplay = (binary_dilation(nMask, footprint=disk(2)) ^ nMask)
     
     for n in range(iData['nCoords'][i].shape[0]):
         
-        yCoord = iData['nCoords'][i][n][0]
-        xCoord = iData['nCoords'][i][n][1]
+        yCoord = int(iData['nCoords'][i][n][0])
+        xCoord = int(iData['nCoords'][i][n][1])
         nLabel = iData['nLabels'][i][n]
+        nIntRFP = iData['nIntRFP'][i][n]
+        nIntGFP = iData['nIntGFP'][i][n]
         
         tmpDisplay = cv2.putText(
-            tmpDisplay.astype('uint16'), str(nLabel), (xCoord + 12, yCoord - 6),
+            tmpDisplay.astype('uint16'), str(nLabel), (xCoord + 16, yCoord - 12),
             cv2.FONT_HERSHEY_DUPLEX, 1, (1,1,1), 1, cv2.LINE_AA
+            ) 
+        
+        tmpDisplay = cv2.putText(
+            tmpDisplay.astype('uint16'), str(int(nIntRFP)), (xCoord + 16, yCoord + 12),
+            cv2.FONT_HERSHEY_DUPLEX, 0.75, (1,1,1), 1, cv2.LINE_AA
             )  
         
     nDisplay.append(np.stack((RFP_img, GFP_img, tmpDisplay * 65535), axis=0))
-    
+
 # -----------------------------------------------------------------------------
 
 nDisplay = np.stack(nDisplay)
 display_name = name + '_display.tif'
 
-val_range = np.arange(65535, dtype=np.uint8)
-
-lut_magenta= np.zeros((3, 65535), dtype='uint16')
-lut_magenta[[0,2],:] = np.arange(65535, dtype='uint16')
-
-lut_green = np.zeros((3, 65535), dtype='uint16')
-lut_green[1, :] = val_range
-
+val_range = np.arange(256, dtype='uint8')
 lut_gray = np.stack([val_range, val_range, val_range])
+lut_green = np.zeros((3, 256), dtype='uint8')
+lut_green[1, :] = val_range
+lut_magenta= np.zeros((3, 256), dtype='uint8')
+lut_magenta[[0,2],:] = np.arange(256, dtype='uint8')
 
 io.imsave(
     Path(folder_path, display_name),
@@ -216,7 +239,7 @@ io.imsave(
     metadata={
         'axes': 'ZCYX', 
         'mode': 'composite',
-        'LUTs': [lut_magenta, lut_green, lut_gray]
+        'LUTs': [lut_magenta, lut_green, lut_gray],
         }
     )
     
