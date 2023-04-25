@@ -71,6 +71,9 @@ for img_path in sorted(Path('data').iterdir()):
 mDist = 25
 thresh = 7500
 
+start = time.time()
+print('Process')
+
 # Add keys to iData
 iData['nCoords'] = []
 iData['cMask'] = []
@@ -80,6 +83,64 @@ iData['nLabels'] = []
 iData['nAreas'] = []
 iData['nIntRFP'] = []
 iData['nIntGFP'] = []
+
+def process(RFP_img):
+    
+    # Find nuclei positions (local maxima)
+    lmCoords = peak_local_max(
+        RFP_img, min_distance=mDist, threshold_abs=thresh
+        )
+    
+    # Get circle mask (centered on nuclei positions)
+    cMask = np.zeros_like(RFP_img, dtype=bool)
+    for coord in lmCoords:
+        rr, cc = disk(coord, mDist//2.5, shape=RFP_img.shape)
+        cMask[rr, cc] = True
+        
+    # Get nuclei mask
+    nMask = RFP_img > thresh/2
+    nMask[cMask==False] = False
+    
+    return 
+    
+
+    
+    # if parallel:
+    
+    #     # Run parallel
+    #     output_list = Parallel(n_jobs=-1)(
+    #         delayed(_pre_processing)(
+    #             raw,
+    #             )
+    #         for raw in raw
+    #         )
+        
+    # else:
+        
+    #     # Run serial
+    #     output_list = [_pre_processing(
+    #             raw,
+    #             )
+    #         for raw in raw
+    #         ]
+        
+    # # Fill output dictionary
+    # output_dict = {
+    
+    # Parameters
+    'binning': binning,
+    'ridge_size': ridge_size,
+    'thresh_coeff': thresh_coeff,
+    
+    # Data
+    'rsize': np.stack(
+        [data[0] for data in output_list], axis=0).squeeze(),
+    'ridges': np.stack(
+        [data[1] for data in output_list], axis=0).squeeze(),
+    'mask': np.stack(
+        [data[2] for data in output_list], axis=0).squeeze(),
+
+    }
 
 # Segment nuclei and extract info
 for i, RFP_img in enumerate(np.stack(iData['RFP_img'])):
@@ -119,129 +180,117 @@ for i, RFP_img in enumerate(np.stack(iData['RFP_img'])):
     iData['nIntRFP'].append(nIntRFP)
     iData['nIntGFP'].append(nIntGFP)
     
+end = time.time()
+print(f'  {(end-start):5.3f} s') 
+    
 #%%
 
-# Create empty DataFrame (nuclei data = nData)
-headers = [
-    'name', 'strain', 'cond', 'tp', 'exp',
-    'xCoord', 'yCoord', 'nLabel', 'nArea', 'nIntRFP', 'nIntGFP',
-    ]
+# # Create empty DataFrame (nuclei data = nData)
+# headers = [
+#     'name', 'strain', 'cond', 'tp', 'exp',
+#     'xCoord', 'yCoord', 'nLabel', 'nArea', 'nIntRFP', 'nIntGFP',
+#     ]
 
-nData = pd.DataFrame(columns=headers)
+# nData = pd.DataFrame(columns=headers)
 
-# Append nData
-for i in range(len(iData['name'])):
+# # Append nData
+# for i in range(len(iData['name'])):
     
-    name = iData['name'][i]
-    strain = iData['strain'][i]
-    cond = iData['cond'][i]
-    tp = iData['tp'][i]
-    exp = iData['exp'][i]
+#     name = iData['name'][i]
+#     strain = iData['strain'][i]
+#     cond = iData['cond'][i]
+#     tp = iData['tp'][i]
+#     exp = iData['exp'][i]
     
-    for n in range(iData['nCoords'][i].shape[0]):
+#     for n in range(iData['nCoords'][i].shape[0]):
         
-        yCoord = iData['nCoords'][i][n][0]
-        xCoord = iData['nCoords'][i][n][1]
-        nLabel = iData['nLabels'][i][n]
-        nArea = iData['nAreas'][i][n]
-        nIntRFP = iData['nIntRFP'][i][n]
-        nIntGFP = iData['nIntGFP'][i][n]
+#         yCoord = iData['nCoords'][i][n][0]
+#         xCoord = iData['nCoords'][i][n][1]
+#         nLabel = iData['nLabels'][i][n]
+#         nArea = iData['nAreas'][i][n]
+#         nIntRFP = iData['nIntRFP'][i][n]
+#         nIntGFP = iData['nIntGFP'][i][n]
         
-        nData.loc[len(nData)] = [
-            name, strain, cond, tp, exp,
-            yCoord, xCoord, nLabel, nArea, nIntRFP, nIntGFP,
-            ]
+#         nData.loc[len(nData)] = [
+#             name, strain, cond, tp, exp,
+#             yCoord, xCoord, nLabel, nArea, nIntRFP, nIntGFP,
+#             ]
         
 #%%
 
-from datetime import datetime
-date = datetime.now().strftime("%y%m%d-%H%M%S")
+# from datetime import datetime
+# date = datetime.now().strftime("%y%m%d-%H%M%S")
 
-# -----------------------------------------------------------------------------
+# # -----------------------------------------------------------------------------
 
-folder_name = f'{date}_analysis'
-folder_path = Path('data') / folder_name
-folder_path.mkdir(parents=True, exist_ok=False)
+# folder_name = f'{date}_analysis'
+# folder_path = Path('data') / folder_name
+# folder_path.mkdir(parents=True, exist_ok=False)
 
-# -----------------------------------------------------------------------------
+# # -----------------------------------------------------------------------------
 
-nData.to_csv(Path(folder_path) / 'nData.csv', index=False, float_format='%.3f')
+# nData.to_csv(Path(folder_path) / 'nData.csv', index=False, float_format='%.3f')
 
-# -----------------------------------------------------------------------------
+# # -----------------------------------------------------------------------------
 
 #%%
 
-from dtype import ranged_conversion
-from skimage.morphology import disk
-from skimage.exposure import rescale_intensity
+# from skimage.morphology import disk
+# from skimage.exposure import rescale_intensity
 
-nDisplay = []
-for i in range(len(iData['name'])):
+# nDisplay = []
+# for i in range(len(iData['name'])):
     
-    name = iData['name'][i]
-    nMask = iData['nMask'][i]
-    RFP_img = iData['RFP_img'][i]
-    GFP_img = iData['GFP_img'][i]
-    # RFP_img = rescale_intensity(iData['RFP_img'][i], in_range=(0, 10000), out_range='uint16')
-    # GFP_img = rescale_intensity(iData['GFP_img'][i], in_range=(0, 2500), out_range='uint16')
-    # RFP_img = ranged_conversion(
-    #     iData['RFP_img'][i], 
-    #     intensity_range=(1,99), 
-    #     spread=10, 
-    #     dtype='uint16'
-    #     )
-    # GFP_img = ranged_conversion(
-    #     iData['GFP_img'][i], 
-    #     intensity_range=(1,99), 
-    #     spread=10, 
-    #     dtype='uint16'
-    #     )
+#     name = iData['name'][i]
+#     nMask = iData['nMask'][i]
+#     RFP_img = iData['RFP_img'][i]
+#     GFP_img = iData['GFP_img'][i]
     
-    tmpDisplay = (binary_dilation(nMask, footprint=disk(2)) ^ nMask)
+#     tmpDisplay = (binary_dilation(nMask, footprint=disk(2)) ^ nMask)
     
-    for n in range(iData['nCoords'][i].shape[0]):
+#     for n in range(iData['nCoords'][i].shape[0]):
         
-        yCoord = int(iData['nCoords'][i][n][0])
-        xCoord = int(iData['nCoords'][i][n][1])
-        nLabel = iData['nLabels'][i][n]
-        nIntRFP = iData['nIntRFP'][i][n]
-        nIntGFP = iData['nIntGFP'][i][n]
+#         yCoord = int(iData['nCoords'][i][n][0])
+#         xCoord = int(iData['nCoords'][i][n][1])
+#         nLabel = iData['nLabels'][i][n]
+#         nIntRFP = iData['nIntRFP'][i][n]
+#         nIntGFP = iData['nIntGFP'][i][n]
         
-        tmpDisplay = cv2.putText(
-            tmpDisplay.astype('uint16'), str(nLabel), (xCoord + 16, yCoord - 12),
-            cv2.FONT_HERSHEY_DUPLEX, 1, (1,1,1), 1, cv2.LINE_AA
-            ) 
+#         tmpDisplay = cv2.putText(
+#             tmpDisplay.astype('uint16'), str(nLabel), (xCoord + 16, yCoord - 12),
+#             cv2.FONT_HERSHEY_DUPLEX, 1, (1,1,1), 1, cv2.LINE_AA
+#             ) 
         
-        tmpDisplay = cv2.putText(
-            tmpDisplay.astype('uint16'), str(int(nIntRFP)), (xCoord + 16, yCoord + 12),
-            cv2.FONT_HERSHEY_DUPLEX, 0.75, (1,1,1), 1, cv2.LINE_AA
-            )  
+#         tmpDisplay = cv2.putText(
+#             tmpDisplay.astype('uint16'), str(int(nIntRFP)), (xCoord + 16, yCoord + 12),
+#             cv2.FONT_HERSHEY_DUPLEX, 0.75, (1,1,1), 1, cv2.LINE_AA
+#             )  
         
-    nDisplay.append(np.stack((RFP_img, GFP_img, tmpDisplay * 65535), axis=0))
+#     nDisplay.append(np.stack((RFP_img, GFP_img, tmpDisplay * 65535), axis=0))
 
 # -----------------------------------------------------------------------------
 
-nDisplay = np.stack(nDisplay)
-display_name = name + '_display.tif'
+# nDisplay = np.stack(nDisplay)
+# display_name = name + '_display.tif'
 
-val_range = np.arange(256, dtype='uint8')
-lut_gray = np.stack([val_range, val_range, val_range])
-lut_green = np.zeros((3, 256), dtype='uint8')
-lut_green[1, :] = val_range
-lut_magenta= np.zeros((3, 256), dtype='uint8')
-lut_magenta[[0,2],:] = np.arange(256, dtype='uint8')
+# val_range = np.arange(256, dtype='uint8')
+# lut_gray = np.stack([val_range, val_range, val_range])
+# lut_green = np.zeros((3, 256), dtype='uint8')
+# lut_green[1, :] = val_range
+# lut_magenta= np.zeros((3, 256), dtype='uint8')
+# lut_magenta[[0,2],:] = np.arange(256, dtype='uint8')
 
-io.imsave(
-    Path(folder_path, display_name),
-    nDisplay,
-    check_contrast=False,
-    imagej=True,
-    metadata={
-        'axes': 'ZCYX', 
-        'mode': 'composite',
-        'LUTs': [lut_magenta, lut_green, lut_gray],
-        }
-    )
+# io.imsave(
+#     Path(folder_path, display_name),
+#     nDisplay,
+#     check_contrast=False,
+#     imagej=True,
+#     metadata={
+#         'axes': 'ZCYX', 
+#         'mode': 'composite',
+#         'LUTs': [lut_magenta, lut_green, lut_gray],
+#         }
+#     )
     
 #%%
 
