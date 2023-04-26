@@ -15,6 +15,12 @@ from skimage.measure import regionprops
 from skimage.feature import peak_local_max
 from skimage.morphology import binary_dilation, label
 
+#%% Parameters ----------------------------------------------------------------
+
+minDist = 30 # minimum distance between two detected nuclei (pixels)
+minProm = 7500 # minimum prominence (brightness) for nuclei detection (A.U.)
+
+
 #%% Initialize ----------------------------------------------------------------
 
 # Create empty dict (imgage data = iData)
@@ -66,10 +72,7 @@ for img_path in sorted(Path('data').iterdir()):
         iData['tp'].append(tp)
         iData['exp'].append(exp)
 
-#%% 
-
-mDist = 25
-thresh = 7500
+#%% Detect nuclei -------------------------------------------------------------
 
 # Add keys to iData
 iData['nCoords'] = []
@@ -86,17 +89,17 @@ for i, RFP_img in enumerate(np.stack(iData['RFP_img'])):
     
     # Find nuclei positions (local maxima)
     lmCoords = peak_local_max(
-        RFP_img, min_distance=mDist, threshold_abs=thresh
+        RFP_img, min_distance=minDist, threshold_abs=minProm
         )
     
     # Get circle mask (centered on nuclei positions)
     cMask = np.zeros_like(RFP_img, dtype=bool)
     for coord in lmCoords:
-        rr, cc = disk(coord, mDist//2.5, shape=RFP_img.shape)
+        rr, cc = disk(coord, minDist//2, shape=RFP_img.shape)
         cMask[rr, cc] = True
         
     # Get nuclei mask
-    nMask = RFP_img > thresh/2
+    nMask = RFP_img > minProm/2
     nMask[cMask==False] = False
     
     # Get nuclei info
@@ -119,8 +122,6 @@ for i, RFP_img in enumerate(np.stack(iData['RFP_img'])):
     iData['nIntRFP'].append(nIntRFP)
     iData['nIntGFP'].append(nIntGFP)
     
-#%%
-
 # Create empty DataFrame (nuclei data = nData)
 headers = [
     'name', 'strain', 'cond', 'tp', 'exp',
@@ -151,16 +152,8 @@ for i in range(len(iData['name'])):
             name, strain, cond, tp, exp,
             yCoord, xCoord, nLabel, nArea, nIntRFP, nIntGFP,
             ]
-        
-#%%
-
-date = datetime.now().strftime("%y%m%d-%H%M%S")
-folder_name = f'{date}_analysis'
-folder_path = Path('data') / folder_name
-folder_path.mkdir(parents=True, exist_ok=False)
-nData.to_csv(Path(folder_path) / 'nData.csv', index=False, float_format='%.3f')
-
-#%%
+    
+#%% Make display --------------------------------------------------------------
 
 from skimage.morphology import disk
 
@@ -199,15 +192,26 @@ for i in range(len(iData['name'])):
         
     nDisplay.append(np.stack((RFP_img, GFP_img, tmpDisplay * 65535), axis=0))
 
-
 nDisplay = np.stack(nDisplay)
+
+#%% Save ----------------------------------------------------------------------
+
+# Create analysis folder
+date = datetime.now().strftime("%y%m%d-%H%M%S")
+folder_name = f'{date}_analysis'
+folder_path = Path('data', 'outputs') / folder_name
+folder_path.mkdir(parents=True, exist_ok=False)
+
+# Save nData DataFrame as csv
+nData.to_csv(Path(folder_path) / 'nData.csv', index=False, float_format='%.3f')
+
+# Save display image
 val_range = np.arange(256, dtype='uint8')
 lut_gray = np.stack([val_range, val_range, val_range])
 lut_green = np.zeros((3, 256), dtype='uint8')
 lut_green[1, :] = val_range
 lut_magenta= np.zeros((3, 256), dtype='uint8')
 lut_magenta[[0,2],:] = np.arange(256, dtype='uint8')
-
 io.imsave(
     Path(folder_path, 'nDisplay.tif'),
     nDisplay,
