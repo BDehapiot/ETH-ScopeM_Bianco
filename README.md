@@ -22,6 +22,7 @@ https://docs.conda.io/en/latest/miniconda.html
 ## Parameters
 - `minDist` is the minimum distance between two detected nuclei (pixels)
 - `minProm` is the minimum prominence (brightness) for nuclei detection (A.U.)
+- `threshCoeff` nuclei segmentation threshold = `minProm` * `threshCoeff`
 
 ## Outputs
 - `nData.csv`

@@ -19,7 +19,7 @@ from skimage.morphology import binary_dilation, label
 
 minDist = 30 # minimum distance between two detected nuclei (pixels)
 minProm = 7500 # minimum prominence (brightness) for nuclei detection (A.U.)
-
+threshCoeff = 0.5 # nuclei segmentation threshold = minProm * threshCoeff
 
 #%% Initialize ----------------------------------------------------------------
 
@@ -99,7 +99,7 @@ for i, RFP_img in enumerate(np.stack(iData['RFP_img'])):
         cMask[rr, cc] = True
         
     # Get nuclei mask
-    nMask = RFP_img > minProm/2
+    nMask = RFP_img > minProm * threshCoeff
     nMask[cMask==False] = False
     
     # Get nuclei info
@@ -203,7 +203,9 @@ folder_path = Path('data', 'outputs') / folder_name
 folder_path.mkdir(parents=True, exist_ok=False)
 
 # Save nData DataFrame as csv
-nData.to_csv(Path(folder_path) / 'nData.csv', index=False, float_format='%.3f')
+nData.to_csv(
+    Path(folder_path) / 'nData.csv', index=False, float_format='%.3f'
+    )
 
 # Save display image
 val_range = np.arange(256, dtype='uint8')
