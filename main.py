@@ -19,6 +19,7 @@ from skimage.morphology import binary_dilation, label
 minDist = 30 # minimum distance between two detected nuclei (pixels)
 minProm = 7500 # minimum prominence (brightness) for nuclei detection (A.U.)
 threshCoeff = 0.5 # nuclei segmentation threshold = minProm * threshCoeff
+statTest = 'ttest' # statistic test ('ttest' or 'utest')
 
 #%% Initialize ----------------------------------------------------------------
 
@@ -225,8 +226,7 @@ for strain in np.unique(nData['strain']):
 # -----------------------------------------------------------------------------
   
 # Statistics (ttest & mwtest)
-tTest_nIntRFP = []; mwTest_nIntRFP = []
-tTest_nIntGFP = []; mwTest_nIntGFP = []
+test_nIntRFP = []; test_nIntGFP = []
 for strain in np.unique(nData['strain']):
     
     # Extract strain data dict (strData)
@@ -245,18 +245,21 @@ for strain in np.unique(nData['strain']):
         
         rName = strData['strain'][0] + '_' + strData['cond'][0] + '_' + strData['tp'][0]
         tName = strData['strain'][i] + '_' + strData['cond'][i] + '_' + strData['tp'][i]
-  
-        _, p = ttest_ind(crtl_nIntRFP, data.to_numpy()[:,0], equal_var=True)
-        tTest_nIntRFP.append((rName , tName, 'nIntRFP', 'tTest', p))        
-        _, p = mannwhitneyu(crtl_nIntRFP, data.to_numpy()[:,0])
-        mwTest_nIntRFP.append((rName , tName, 'nIntRFP', 'mwTest', p))       
-        _, p = ttest_ind(crtl_nIntGFP, data.to_numpy()[:,1], equal_var=True)
-        tTest_nIntGFP.append((rName , tName, 'nIntGFP', 'tTest', p))  
-        _, p = mannwhitneyu(crtl_nIntGFP, data.to_numpy()[:,1])
-        mwTest_nIntGFP.append((rName , tName, 'nIntGFP', 'mwTest', p))
+
+        if statTest == 'ttest':   
+            _, p = ttest_ind(crtl_nIntRFP, data.to_numpy()[:,0], equal_var=True)
+            test_nIntRFP.append((rName , tName, 'nIntRFP', 'tTest', p))            
+            _, p = ttest_ind(crtl_nIntGFP, data.to_numpy()[:,1], equal_var=True)
+            test_nIntGFP.append((rName , tName, 'nIntGFP', 'tTest', p))  
         
-headers = ['ref_cond', 'test_cond', 'channel', 'test_type', 'p']
-sData = tTest_nIntRFP + mwTest_nIntRFP + tTest_nIntGFP + mwTest_nIntGFP
+        if statTest == 'utest': 
+            _, p = mannwhitneyu(crtl_nIntRFP, data.to_numpy()[:,0])
+            test_nIntRFP.append((rName , tName, 'nIntRFP', 'mwTest', p))       
+            _, p = mannwhitneyu(crtl_nIntGFP, data.to_numpy()[:,1])
+            test_nIntGFP.append((rName , tName, 'nIntGFP', 'mwTest', p))
+        
+headers = ['ref_cond', 'test_cond', 'channel', statTest, 'p']
+sData = test_nIntRFP + test_nIntGFP
 sData = pd.DataFrame(sData, columns=headers)
 
 # -----------------------------------------------------------------------------
@@ -272,25 +275,20 @@ xLabels = [
     ]
 
 tLabels_nIntRFP = [
-    f'p = \n{tP:.2e}'
-    print(tP)
-    for (tP, mwP) 
-    in zip(tTest_nIntRFP[4], mwTest_nIntRFP[4])
+    f'{statTest}\n{p[-1]:.2e}'
+    for p in test_nIntRFP
     ]
 tLabels_nIntRFP = [
-    '' if val == 'p = \n1.00e+00' else val 
+    '' if val == f'{statTest}\n1.00e+00' else val 
     for val in tLabels_nIntRFP 
     ]
 
-test = tTest_nIntRFP
-
 tLabels_nIntGFP = [
-    f'p = \n{tP:.2e}' 
-    for (tP, mwP) 
-    in zip(tTest_nIntGFP[4], mwTest_nIntGFP[4])
+    f'{statTest}\n{p[-1]:.2e}'
+    for p in test_nIntGFP
     ]
 tLabels_nIntGFP = [
-    '' if val == 'p = \n1.00e+00' else val 
+    '' if val == f'{statTest}\n1.00e+00' else val 
     for val in tLabels_nIntGFP 
     ]
         
@@ -329,7 +327,7 @@ nData.to_csv(
     Path(folder_path) / 'nucleiData.csv', index=False, float_format='%.3f'
     )
 sData.to_csv(
-    Path(folder_path) / 'statData.csv', index=False, float_format='%.3f'
+    Path(folder_path) / 'statData.csv', index=False, float_format='%.2e'
     )
 
 # Save display image
@@ -350,67 +348,3 @@ io.imsave(
         'LUTs': [lut_magenta, lut_green, lut_gray],
         }
     )
-
-#%%
-        
-# # Format data and labels for plotting
-# nIntRFP = [data.to_numpy()[:,0] for data in pData['data']]
-# nIntGFP = [data.to_numpy()[:,1] for data in pData['data']]
-
-# xLabels = [
-#     f'{tp}\n{cond}\n{strain}' 
-#     for (tp, cond, strain) 
-#     in zip(pData['tp'], pData['cond'], pData['strain'])
-#     ]
-
-# tLabels_nIntRFP = [
-#     f'p = \n{tP:.2e}' 
-#     for (tP, mwP) 
-#     in zip(tTest_nIntRFP, mwTest_nIntRFP)
-#     ]
-# tLabels_nIntRFP = [
-#     '' if val == 'p = \n1.00e+00' else val 
-#     for val in tLabels_nIntRFP 
-#     ]
-
-# tLabels_nIntGFP = [
-#     f'p = \n{tP:.2e}' 
-#     for (tP, mwP) 
-#     in zip(tTest_nIntGFP, mwTest_nIntGFP)
-#     ]
-# tLabels_nIntGFP = [
-#     '' if val == 'p = \n1.00e+00' else val 
-#     for val in tLabels_nIntGFP 
-#     ]
-        
-# # Boxplot
-# fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(6, 8))
-# box1 = ax1.boxplot(nIntRFP, labels=xLabels)
-# box2 = ax2.boxplot(nIntGFP, labels=xLabels)
-# plt.subplots_adjust(hspace=0.75)
-# ax1.set_title('Nuclear RFP fluo. int. (A.U.)', y=1.25)
-# ax2.set_title('Nuclear GFP fluo. int. (A.U.)', y=1.25)
-# ax2.tick_params(axis='x', labelsize=8)
-
-# # Add custom labels on top of each box
-# for i, (box_obj, tLabel) in enumerate(zip(box1['boxes'], tLabels_nIntRFP)):
-#     box_coords = box_obj.get_path().vertices
-#     box_x = np.mean(box_coords[:, 0])
-#     box_y = np.max(box_coords[:, 1])
-#     ax1.text(box_x, ax1.get_ylim()[1]*1.05, tLabel, ha='center', va='bottom', fontsize=8)
-    
-# for i, (box_obj, tLabel) in enumerate(zip(box2['boxes'], tLabels_nIntGFP)):
-#     box_coords = box_obj.get_path().vertices
-#     box_x = np.mean(box_coords[:, 0])
-#     box_y = np.max(box_coords[:, 1])
-#     ax2.text(box_x, ax2.get_ylim()[1]*1.05, tLabel, ha='center', va='bottom', fontsize=8)
-
-#%%
-
-# import napari
-# viewer = napari.Viewer()
-# viewer.add_image(np.stack(iData['GFP_img']))
-# viewer.add_image(np.stack(iData['RFP_img']))
-# viewer.add_image(np.stack(iData['cMask']), blending='additive', colormap='red')
-# viewer.add_image(np.stack(iData['nMask']), blending='additive')
-# viewer.add_image(np.stack(iData['nDisplay']), blending='additive')

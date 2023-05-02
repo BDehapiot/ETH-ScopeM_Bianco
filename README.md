@@ -20,13 +20,19 @@ https://docs.conda.io/en/latest/miniconda.html
 `pip install spyder` 
 
 ## Parameters
-- `minDist` is the minimum distance between two detected nuclei (pixels)
-- `minProm` is the minimum prominence (brightness) for nuclei detection (A.U.)
-- `threshCoeff` nuclei segmentation threshold = `minProm` * `threshCoeff`
+- `minDist` - minimum distance between two detected nuclei (pixels)
+- `minProm` - minimum prominence (brightness) for nuclei detection (A.U.)
+- `threshCoeff` - nuclei segmentation threshold = `minProm` * `threshCoeff`
+- `statTest` - statistic test should be equal to 'ttest' or 'utest'
 
 ## Outputs
-- `nData.csv`
-- `nDisplay.tif`
+- `nucleiData.csv` - individual nuclei RFP and GFP fluo. int. data
+- `statData.csv` - statistics data (ttest of utest)
+- `nucleiDisplay.tif` - images showing analysis results 
+    - outlines = nuclei segmentation
+    - top number = nuclei ID
+    - middle number = RFP fluo. int.
+    - bottom number = GFP fluo. int. 
 
 
 
