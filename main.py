@@ -2,7 +2,6 @@
 
 import re
 import cv2
-import time
 import numpy as np
 import pandas as pd
 from skimage import io 
@@ -10,9 +9,9 @@ from pathlib import Path
 from skimage.draw import disk
 from datetime import datetime
 import matplotlib.pyplot as plt
-from joblib import Parallel, delayed
 from skimage.measure import regionprops
 from skimage.feature import peak_local_max
+from scipy.stats import ttest_ind, mannwhitneyu
 from skimage.morphology import binary_dilation, label
 
 #%% Parameters ----------------------------------------------------------------
@@ -193,6 +192,129 @@ for i in range(len(iData['name'])):
     nDisplay.append(np.stack((RFP_img, GFP_img, tmpDisplay * 65535), axis=0))
 
 nDisplay = np.stack(nDisplay)
+  
+#%% Plot & Statistics ---------------------------------------------------------
+
+# Create empty dict (plot data = pData)
+pData = {
+    'strain': [],
+    'cond': [],
+    'tp': [],
+    'data': [],
+    }
+
+for strain in np.unique(nData['strain']):
+    for cond in np.unique(nData['cond']):
+        for tp in np.unique(nData['tp']):
+            
+            # Extract nIntRFP and nIntGFP data
+            data = nData.loc[
+                (nData['strain'] == strain) &
+                (nData['cond'] == cond) &
+                (nData['tp'] == tp),
+                ['nIntRFP', 'nIntGFP']
+                ]
+            
+            if not data.empty:
+                
+                pData['strain'].append(strain)
+                pData['cond'].append(cond)
+                pData['tp'].append(str(tp))
+                pData['data'].append(data)
+  
+# -----------------------------------------------------------------------------
+  
+# Statistics (ttest & mwtest)
+tTest_nIntRFP = []; mwTest_nIntRFP = []
+tTest_nIntGFP = []; mwTest_nIntGFP = []
+for strain in np.unique(nData['strain']):
+    
+    # Extract strain data dict (strData)
+    idx = [i for i, val in enumerate(pData['strain']) if val == strain]    
+    strData = {
+        key: value[idx[0]:idx[-1]+1] 
+        for key, value 
+        in pData.items()
+        }
+    
+    # Perform statistical tests (against ctrl 0 min)
+    crtl_nIntRFP = strData['data'][0].to_numpy()[:,0]
+    crtl_nIntGFP = strData['data'][0].to_numpy()[:,1]
+    
+    for i, data in enumerate(strData['data']):
+        
+        rName = strData['strain'][0] + '_' + strData['cond'][0] + '_' + strData['tp'][0]
+        tName = strData['strain'][i] + '_' + strData['cond'][i] + '_' + strData['tp'][i]
+  
+        _, p = ttest_ind(crtl_nIntRFP, data.to_numpy()[:,0], equal_var=True)
+        tTest_nIntRFP.append((rName , tName, 'nIntRFP', 'tTest', p))        
+        _, p = mannwhitneyu(crtl_nIntRFP, data.to_numpy()[:,0])
+        mwTest_nIntRFP.append((rName , tName, 'nIntRFP', 'mwTest', p))       
+        _, p = ttest_ind(crtl_nIntGFP, data.to_numpy()[:,1], equal_var=True)
+        tTest_nIntGFP.append((rName , tName, 'nIntGFP', 'tTest', p))  
+        _, p = mannwhitneyu(crtl_nIntGFP, data.to_numpy()[:,1])
+        mwTest_nIntGFP.append((rName , tName, 'nIntGFP', 'mwTest', p))
+        
+headers = ['ref_cond', 'test_cond', 'channel', 'test_type', 'p']
+sData = tTest_nIntRFP + mwTest_nIntRFP + tTest_nIntGFP + mwTest_nIntGFP
+sData = pd.DataFrame(sData, columns=headers)
+
+# -----------------------------------------------------------------------------
+
+# Format data and labels for plotting
+nIntRFP = [data.to_numpy()[:,0] for data in pData['data']]
+nIntGFP = [data.to_numpy()[:,1] for data in pData['data']]
+
+xLabels = [
+    f'{tp}\n{cond}\n{strain}' 
+    for (tp, cond, strain) 
+    in zip(pData['tp'], pData['cond'], pData['strain'])
+    ]
+
+tLabels_nIntRFP = [
+    f'p = \n{tP:.2e}'
+    print(tP)
+    for (tP, mwP) 
+    in zip(tTest_nIntRFP[4], mwTest_nIntRFP[4])
+    ]
+tLabels_nIntRFP = [
+    '' if val == 'p = \n1.00e+00' else val 
+    for val in tLabels_nIntRFP 
+    ]
+
+test = tTest_nIntRFP
+
+tLabels_nIntGFP = [
+    f'p = \n{tP:.2e}' 
+    for (tP, mwP) 
+    in zip(tTest_nIntGFP[4], mwTest_nIntGFP[4])
+    ]
+tLabels_nIntGFP = [
+    '' if val == 'p = \n1.00e+00' else val 
+    for val in tLabels_nIntGFP 
+    ]
+        
+# Boxplot
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(6, 8))
+box1 = ax1.boxplot(nIntRFP, labels=xLabels)
+box2 = ax2.boxplot(nIntGFP, labels=xLabels)
+plt.subplots_adjust(hspace=0.75)
+ax1.set_title('Nuclear RFP fluo. int. (A.U.)', y=1.25)
+ax2.set_title('Nuclear GFP fluo. int. (A.U.)', y=1.25)
+ax2.tick_params(axis='x', labelsize=8)
+
+# Add custom labels on top of each box
+for i, (box_obj, tLabel) in enumerate(zip(box1['boxes'], tLabels_nIntRFP)):
+    box_coords = box_obj.get_path().vertices
+    box_x = np.mean(box_coords[:, 0])
+    box_y = np.max(box_coords[:, 1])
+    ax1.text(box_x, ax1.get_ylim()[1]*1.05, tLabel, ha='center', va='bottom', fontsize=8)
+    
+for i, (box_obj, tLabel) in enumerate(zip(box2['boxes'], tLabels_nIntGFP)):
+    box_coords = box_obj.get_path().vertices
+    box_x = np.mean(box_coords[:, 0])
+    box_y = np.max(box_coords[:, 1])
+    ax2.text(box_x, ax2.get_ylim()[1]*1.05, tLabel, ha='center', va='bottom', fontsize=8)
 
 #%% Save ----------------------------------------------------------------------
 
@@ -202,9 +324,12 @@ folder_name = f'{date}_analysis'
 folder_path = Path('data', 'outputs') / folder_name
 folder_path.mkdir(parents=True, exist_ok=False)
 
-# Save nData DataFrame as csv
+# Save  DataFrame as csv
 nData.to_csv(
-    Path(folder_path) / 'nData.csv', index=False, float_format='%.3f'
+    Path(folder_path) / 'nucleiData.csv', index=False, float_format='%.3f'
+    )
+sData.to_csv(
+    Path(folder_path) / 'statData.csv', index=False, float_format='%.3f'
     )
 
 # Save display image
@@ -215,7 +340,7 @@ lut_green[1, :] = val_range
 lut_magenta= np.zeros((3, 256), dtype='uint8')
 lut_magenta[[0,2],:] = np.arange(256, dtype='uint8')
 io.imsave(
-    Path(folder_path, 'nDisplay.tif'),
+    Path(folder_path, 'nucleiDisplay.tif'),
     nDisplay,
     check_contrast=False,
     imagej=True,
@@ -225,68 +350,7 @@ io.imsave(
         'LUTs': [lut_magenta, lut_green, lut_gray],
         }
     )
-    
-#%%
 
-# from scipy.stats import ttest_ind, mannwhitneyu
-
-# # Create empty dict (plot data = pData)
-# pData = {
-#     'strain': [],
-#     'cond': [],
-#     'tp': [],
-#     'data': [],
-#     }
-
-# for strain in np.unique(nData['strain']):
-#     for cond in np.unique(nData['cond']):
-#         for tp in np.unique(nData['tp']):
-            
-#             # Extract nIntRFP and nIntGFP data
-#             data = nData.loc[
-#                 (nData['strain'] == strain) &
-#                 (nData['cond'] == cond) &
-#                 (nData['tp'] == tp),
-#                 ['nIntRFP', 'nIntGFP']
-#                 ]
-            
-#             if not data.empty:
-                
-#                 pData['strain'].append(strain)
-#                 pData['cond'].append(cond)
-#                 pData['tp'].append(str(tp))
-#                 pData['data'].append(data)
-                
-# # Statistics (ttest & mwtest)
-# tTest_nIntRFP = []; mwTest_nIntRFP = []
-# tTest_nIntGFP = []; mwTest_nIntGFP = []
-# for strain in np.unique(nData['strain']):
-    
-#     # Extract strain data dict (sData)
-#     idx = [i for i, val in enumerate(pData['strain']) if val == strain]    
-#     sData = {
-#         key: value[idx[0]:idx[-1]+1] 
-#         for key, value 
-#         in pData.items()
-#         }
-    
-#     # Perform statistical tests (against ctrl 0 min)
-#     crtl_nIntRFP = sData['data'][0].to_numpy()[:,0]
-#     crtl_nIntGFP = sData['data'][0].to_numpy()[:,1]
-    
-#     for data in sData['data']:      
-        
-#         test_nIntRFP = data.to_numpy()[:,0]  
-#         _, p = ttest_ind(crtl_nIntRFP, test_nIntRFP, equal_var=True)
-#         tTest_nIntRFP.append(p)
-#         _, p = mannwhitneyu(crtl_nIntRFP, test_nIntRFP)
-#         mwTest_nIntRFP.append(p)
-#         test_nIntGFP = data.to_numpy()[:,1]
-#         _, p = ttest_ind(crtl_nIntGFP, test_nIntGFP, equal_var=True)
-#         tTest_nIntGFP.append(p)
-#         _, p = mannwhitneyu(crtl_nIntGFP, test_nIntGFP)
-#         mwTest_nIntGFP.append(p)
-        
 #%%
         
 # # Format data and labels for plotting

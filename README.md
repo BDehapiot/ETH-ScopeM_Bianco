@@ -1,5 +1,5 @@
 # ETH-ScopeM_Bianco
-Measurement of nuclear fluo. int. of GFP-tagged proteins in S.cerevisiae
+Measurement of nuclear fluo. int. of GFP-tagged proteins in *S. cerevisiae*
 
 ## Installation
 1 - Download this GitHub repository  
