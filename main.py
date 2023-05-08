@@ -33,6 +33,7 @@ iData = {
     'strain': [],
     'cond': [],
     'tp': [],
+    'rep': [],
     'exp': [],
     }
 
@@ -57,10 +58,11 @@ for img_path in sorted(Path('data').iterdir()):
         if '30min' in name: tp = 30
         if '60min' in name: tp = 60
         if '120min' in name: tp = 120   
-        matches = re.finditer(r'_\d_', name)
-        exp = str([match.group(0) for match in matches])    
-        exp = int(exp.translate(str.maketrans('', '', "[]'_")))
-    
+        matches = re.finditer(r'_\d_\d_', name)
+        temp = str([match.group(0) for match in matches])
+        rep = int(temp[3])
+        exp = int(temp[5])
+            
         # Append iData
         iData['name'].append(GFP_name.replace('_GFPdual', ''))
         iData['GFP_name'].append(GFP_name)
@@ -70,6 +72,7 @@ for img_path in sorted(Path('data').iterdir()):
         iData['strain'].append(strain)
         iData['cond'].append(cond)
         iData['tp'].append(tp)
+        iData['rep'].append(rep)
         iData['exp'].append(exp)
 
 #%% Detect nuclei -------------------------------------------------------------
@@ -124,7 +127,7 @@ for i, RFP_img in enumerate(np.stack(iData['RFP_img'])):
     
 # Create empty DataFrame (nuclei data = nData)
 headers = [
-    'name', 'strain', 'cond', 'tp', 'exp',
+    'name', 'strain', 'cond', 'tp', 'rep', 'exp',
     'xCoord', 'yCoord', 'nLabel', 'nArea', 'nIntRFP', 'nIntGFP',
     ]
 
@@ -137,6 +140,7 @@ for i in range(len(iData['name'])):
     strain = iData['strain'][i]
     cond = iData['cond'][i]
     tp = iData['tp'][i]
+    rep = iData['rep'][i]
     exp = iData['exp'][i]
     
     for n in range(iData['nCoords'][i].shape[0]):
@@ -149,7 +153,7 @@ for i in range(len(iData['name'])):
         nIntGFP = iData['nIntGFP'][i][n]
         
         nData.loc[len(nData)] = [
-            name, strain, cond, tp, exp,
+            name, strain, cond, tp, rep, exp,
             yCoord, xCoord, nLabel, nArea, nIntRFP, nIntGFP,
             ]
     
@@ -293,13 +297,33 @@ tLabels_nIntGFP = [
     ]
         
 # Boxplot
-fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(6, 8))
-box1 = ax1.boxplot(nIntRFP, labels=xLabels)
-box2 = ax2.boxplot(nIntGFP, labels=xLabels)
+fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(6, 12))
+box1 = ax1.boxplot(nIntRFP, labels=xLabels, showfliers=False)
+box2 = ax2.boxplot(nIntGFP, labels=xLabels, showfliers=False)
+
+# scat = ax3.scatter([1,2,3,4],[np.mean(data) for data in nIntGFP[0:4]])
+# scat = ax3.scatter([1,2,3,4],[np.mean(data) for data in nIntGFP[4:]])
+
+scat = ax3.errorbar(
+    [1,2,3,4],
+    [np.mean(data) for data in nIntGFP[0:4]],
+    yerr=[np.std(data) for data in nIntGFP[0:4]]
+    )
+
+scat = ax3.errorbar(
+    [1,2,3,4],
+    [np.mean(data) for data in nIntGFP[4:]],
+    yerr=[np.std(data) for data in nIntGFP[4:]]
+    )
+
+test = [np.std(data) for data in nIntGFP]
+
 plt.subplots_adjust(hspace=0.75)
 ax1.set_title('Nuclear RFP fluo. int. (A.U.)', y=1.25)
 ax2.set_title('Nuclear GFP fluo. int. (A.U.)', y=1.25)
 ax2.tick_params(axis='x', labelsize=8)
+
+test = np.mean(nIntGFP[-1])
 
 # Add custom labels on top of each box
 for i, (box_obj, tLabel) in enumerate(zip(box1['boxes'], tLabels_nIntRFP)):
@@ -326,9 +350,9 @@ folder_path.mkdir(parents=True, exist_ok=False)
 nData.to_csv(
     Path(folder_path) / 'nucleiData.csv', index=False, float_format='%.3f'
     )
-sData.to_csv(
-    Path(folder_path) / 'statData.csv', index=False, float_format='%.2e'
-    )
+# sData.to_csv(
+#     Path(folder_path) / 'statData.csv', index=False, float_format='%.2e'
+#     )
 
 # Save display image
 val_range = np.arange(256, dtype='uint8')
