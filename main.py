@@ -6,13 +6,15 @@ import numpy as np
 import pandas as pd
 from skimage import io 
 from pathlib import Path
+import statsmodels.api as sm
 from skimage.draw import disk
 from datetime import datetime
 import matplotlib.pyplot as plt
+from statsmodels.formula.api import ols
 from skimage.measure import regionprops
 from skimage.feature import peak_local_max
 from scipy.stats import ttest_ind, mannwhitneyu
-from skimage.morphology import binary_dilation, label
+from skimage.morphology import binary_dilation, label, remove_small_objects
 
 #%% Parameters ----------------------------------------------------------------
 
@@ -103,6 +105,7 @@ for i, RFP_img in enumerate(np.stack(iData['RFP_img'])):
         
     # Get nuclei mask
     nMask = RFP_img > minProm * threshCoeff
+    nMask = remove_small_objects(nMask, min_size=50)
     nMask[cMask==False] = False
     
     # Get nuclei info
@@ -156,6 +159,28 @@ for i in range(len(iData['name'])):
             name, strain, cond, tp, rep, exp,
             yCoord, xCoord, nLabel, nArea, nIntRFP, nIntGFP,
             ]
+      
+# -----------------------------------------------------------------------------
+        
+# Normalize data (to mean of ctrl nIntRFP or nIntGFP)
+for strain in np.unique(nData['strain']):
+    
+    mCtrl_nIntRFP = np.mean(nData.loc[
+        (nData['strain'] == strain) &
+        (nData['cond'] == 'ctrl'),
+        ['nIntRFP']
+        ])    
+    nData.loc[(nData['strain'] == strain), 'nIntRFP'] = nData.loc[
+        (nData['strain'] == strain), 'nIntRFP'] / mCtrl_nIntRFP
+        
+    mCtrl_nIntGFP = np.mean(nData.loc[
+        (nData['strain'] == strain) &
+        (nData['cond'] == 'ctrl'),
+        ['nIntGFP']
+        ])    
+    nData.loc[(nData['strain'] == strain), 'nIntGFP'] = nData.loc[
+        (nData['strain'] == strain), 'nIntGFP'] / mCtrl_nIntGFP
+
     
 #%% Make display --------------------------------------------------------------
 
@@ -296,34 +321,13 @@ tLabels_nIntGFP = [
     for val in tLabels_nIntGFP 
     ]
         
-# Boxplot
+# Box plot
 fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(6, 12))
 box1 = ax1.boxplot(nIntRFP, labels=xLabels, showfliers=False)
 box2 = ax2.boxplot(nIntGFP, labels=xLabels, showfliers=False)
-
-# scat = ax3.scatter([1,2,3,4],[np.mean(data) for data in nIntGFP[0:4]])
-# scat = ax3.scatter([1,2,3,4],[np.mean(data) for data in nIntGFP[4:]])
-
-scat = ax3.errorbar(
-    [1,2,3,4],
-    [np.mean(data) for data in nIntGFP[0:4]],
-    yerr=[np.std(data) for data in nIntGFP[0:4]]
-    )
-
-scat = ax3.errorbar(
-    [1,2,3,4],
-    [np.mean(data) for data in nIntGFP[4:]],
-    yerr=[np.std(data) for data in nIntGFP[4:]]
-    )
-
-test = [np.std(data) for data in nIntGFP]
-
 plt.subplots_adjust(hspace=0.75)
 ax1.set_title('Nuclear RFP fluo. int. (A.U.)', y=1.25)
 ax2.set_title('Nuclear GFP fluo. int. (A.U.)', y=1.25)
-ax2.tick_params(axis='x', labelsize=8)
-
-test = np.mean(nIntGFP[-1])
 
 # Add custom labels on top of each box
 for i, (box_obj, tLabel) in enumerate(zip(box1['boxes'], tLabels_nIntRFP)):
@@ -337,6 +341,50 @@ for i, (box_obj, tLabel) in enumerate(zip(box2['boxes'], tLabels_nIntGFP)):
     box_x = np.mean(box_coords[:, 0])
     box_y = np.max(box_coords[:, 1])
     ax2.text(box_x, ax2.get_ylim()[1]*1.05, tLabel, ha='center', va='bottom', fontsize=8)
+    
+# -----------------------------------------------------------------------------
+    
+# Scatter plot (hard coded labels)    
+strains = np.unique(nData['strain'])
+conds = np.unique(nData['cond'])
+tps = np.unique(nData['tp'])
+
+scat1 = plt.scatter(
+    [1,2,3,4], 
+    [np.mean(data) for data in nIntGFP[0:4]], 
+    label='yeb678'
+    )
+scat2 = plt.scatter(
+    [1,2,3,4], 
+    [np.mean(data) for data in nIntGFP[4:]],
+    label='yjt456'
+    )
+scat1eb = ax3.errorbar(
+    [1,2,3,4],
+    [np.mean(data) for data in nIntGFP[0:4]],
+    yerr=[np.std(data) for data in nIntGFP[0:4]], 
+    capsize=10
+    )
+scat2eb = ax3.errorbar(
+    [1,2,3,4],
+    [np.mean(data) for data in nIntGFP[4:]],
+    yerr=[np.std(data) for data in nIntGFP[4:]],
+    capsize=10
+    )
+
+# Statistics (two-way ANOVA) to compare strains
+model = ols('nIntGFP ~ C(strain) * C(tp)', data=nData).fit()
+aData = sm.stats.anova_lm(model, typ=2)
+p = aData.loc['C(strain):C(tp)', 'PR(>F)']
+print(aData)
+
+# Add title
+plt.legend(handles=[scat1, scat2])
+ax3.set_title(f'Nuclear GFP fluo. int. (A.U.)\nTwo-way ANOVA p={p:.2e}', y=1.10)
+plt.xticks(
+    [1,2,3,4],
+    ['0\nctrl', '30\nrpmc', '60\nrpmc', '120\nrpmc']
+    )
 
 #%% Save ----------------------------------------------------------------------
 
@@ -350,11 +398,14 @@ folder_path.mkdir(parents=True, exist_ok=False)
 nData.to_csv(
     Path(folder_path) / 'nucleiData.csv', index=False, float_format='%.3f'
     )
-# sData.to_csv(
-#     Path(folder_path) / 'statData.csv', index=False, float_format='%.2e'
-#     )
+sData.to_csv(
+    Path(folder_path) / 'statData_tp.csv', index=False, float_format='%.2e'
+    )
+aData.to_csv(
+    Path(folder_path) / 'statData_cond.csv', index=True, float_format='%.2e'
+    )
 
-# Save display image
+# Save display image as tif
 val_range = np.arange(256, dtype='uint8')
 lut_gray = np.stack([val_range, val_range, val_range])
 lut_green = np.zeros((3, 256), dtype='uint8')
@@ -372,3 +423,6 @@ io.imsave(
         'LUTs': [lut_magenta, lut_green, lut_gray],
         }
     )
+
+# Save plot as png
+plt.savefig(Path(folder_path) / 'statPlot.png', dpi=300)

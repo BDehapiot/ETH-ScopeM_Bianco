@@ -27,8 +27,10 @@ https://docs.conda.io/en/latest/miniconda.html
 
 ## Outputs
 - `nucleiData.csv` - individual nuclei RFP and GFP fluo. int. data
-- `statData.csv` - statistics data (ttest of utest)
-- `nucleiDisplay.tif` - images showing analysis results 
+- `statData_tp.csv` - statistics data comparing timepoints (ttest of utest)
+- `statData_cond.csv` - statistics data comparing conditions (two-way ANOVA)
+- `statPlot.png` - plot recapitulating statistic results
+- `nucleiDisplay.tif` - images showing segmentation/measurments results 
     - outlines = nuclei segmentation
     - top number = nuclei ID
     - middle number = RFP fluo. int.
