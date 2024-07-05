@@ -1,14 +1,23 @@
-name: ETH-ScopeM_Bianco
+name: Bianco
 
 channels:
   - conda-forge
-      
+
 dependencies:
+  # conda_core
   - python=3.9
   - numpy=1.23
   - scipy
+  - pandas
   - scikit-image
   - opencv
-  - pandas
-  - statsmodels
+  - scikit-learn
+  - joblib
   - matplotlib-base=3.6
+  - pip
+  # conda_spec
+  - spyder
+  - statsmodels
+  - pip:
+    # pip_core
+    # pip_spec
